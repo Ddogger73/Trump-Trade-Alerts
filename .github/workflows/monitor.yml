@@ -15,7 +15,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -45,12 +45,18 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python monitor_davidson.py
 
+      - name: Check for new Berkshire 13F
+        if: always()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python monitor_buffett.py
+
       - name: Save seen trades
         if: always()
         run: |
           git config user.name "trade-bot"
           git config user.email "trade-bot@users.noreply.github.com"
-          for f in seen.json seen_pelosi.json seen_davidson.json; do
+          for f in seen.json seen_pelosi.json seen_davidson.json seen_buffett.json; do
             if [ -f "$f" ]; then git add "$f"; fi
           done
           git diff --cached --quiet || (git commit -m "Update seen trades" && git push)
@@ -64,4 +70,5 @@ jobs:
             debug.*
             debug_pelosi.*
             debug_davidson.*
+            debug_buffett.*
           if-no-files-found: ignore
