@@ -53,6 +53,12 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python monitor_buffett.py
 
+      - name: Check for overlapping trades
+        if: always()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python monitor_overlap.py
+
       - name: Keep repo active
         if: always()
         run: |
@@ -68,7 +74,7 @@ jobs:
         run: |
           git config user.name "trade-bot"
           git config user.email "trade-bot@users.noreply.github.com"
-          for f in seen.json seen_pelosi.json seen_davidson.json seen_buffett.json; do
+          for f in seen.json seen_pelosi.json seen_davidson.json seen_buffett.json seen_overlap.json; do
             if [ -f "$f" ]; then git add "$f"; fi
           done
           if ! git diff --cached --quiet; then
