@@ -32,29 +32,3 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python monitor.py
-
-      - name: Check for new Pelosi trades
-        if: always()
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: python monitor_pelosi.py
-
-      - name: Save seen trades
-        if: always()
-        run: |
-          git config user.name "trade-bot"
-          git config user.email "trade-bot@users.noreply.github.com"
-          for f in seen.json seen_pelosi.json; do
-            if [ -f "$f" ]; then git add "$f"; fi
-          done
-          git diff --cached --quiet || (git commit -m "Update seen trades" && git push)
-
-      - name: Upload debug files on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: debug
-          path: |
-            debug.*
-            debug_pelosi.*
-          if-no-files-found: ignore
