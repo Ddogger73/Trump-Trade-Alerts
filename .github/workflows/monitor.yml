@@ -51,6 +51,16 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python monitor_buffett.py
 
+      - name: Keep repo active
+        if: always()
+        run: |
+          last=$(git log -1 --format=%ct)
+          now=$(date +%s)
+          if [ $(( (now - last) / 86400 )) -ge 45 ]; then
+            date -u +"%Y-%m-%d" > .keepalive
+            git add .keepalive
+          fi
+
       - name: Save seen trades
         if: always()
         run: |
