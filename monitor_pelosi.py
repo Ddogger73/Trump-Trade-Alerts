@@ -1,7 +1,7 @@
-"""Watches the Pure Power Picks Pelosi tracker and posts new trades to Discord.
+"""Watches Quiver's Nancy Pelosi page and posts new trades to Discord.
 
-The "Latest Trades" table is filled in by JavaScript (the raw page just says
-"ACQUIRING FILINGS..."), so this uses a headless browser (Playwright).
+Same approach as monitor.py (the Trump tracker): the trades table is loaded by
+JavaScript, so a headless browser (Playwright) renders the page first.
 
 State is kept in seen_pelosi.json. The first run records the existing trades
 without alerting, then only new trades trigger a message.
@@ -17,7 +17,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-URL = "https://purepowerpicks.com/nancy-pelosi-stock-tracker/"
+URL = "https://www.quiverquant.com/congresstrading/politician/NancyPelosi-P000197"
 SEEN_FILE = Path("seen_pelosi.json")
 WEBHOOK = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
 UA = (
@@ -25,16 +25,15 @@ UA = (
     "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 )
 
-# Finds the trades table by its headers, and checks it has real rows (not the
-# "ACQUIRING FILINGS..." placeholder).
+# This page has several tables (holdings, lobbyists, legislation...), so find
+# the trades table by its headers and wait until it has real rows.
 TABLE_READY_JS = """
 () => {
   for (const t of document.querySelectorAll('table')) {
     const head = (t.querySelector('thead') || t).innerText.toLowerCase();
-    if (!head.includes('asset') || !head.includes('action')) continue;
+    if (!head.includes('transaction') || !head.includes('traded')) continue;
     const rows = [...t.querySelectorAll('tbody tr')];
-    if (rows.length && rows.every(r => !r.innerText.toUpperCase().includes('ACQUIRING'))
-        && rows[0].querySelectorAll('td').length >= 3) return true;
+    if (rows.length && rows[0].querySelectorAll('td').length >= 4) return true;
   }
   return false;
 }
@@ -46,10 +45,6 @@ def clean(text: str) -> str:
     return re.sub(r"\s*\n\s*", " | ", text)
 
 
-# Relative times like "3d ago" would change between runs and cause repeat alerts.
-RELATIVE = re.compile(r"\b\d+\s*(?:s|m|h|d|w|min|mins|hr|hrs|hour|hours|day|days|week|weeks)\s*ago\b", re.I)
-
-
 def scrape() -> list[dict]:
     with sync_playwright() as p:
         browser = p.chromium.launch()
@@ -57,34 +52,49 @@ def scrape() -> list[dict]:
         try:
             page.goto(URL, wait_until="domcontentloaded", timeout=60_000)
             page.wait_for_function(TABLE_READY_JS, timeout=60_000)
-            page.wait_for_timeout(1_500)
+            page.wait_for_timeout(2_000)
         except Exception:
             page.screenshot(path="debug_pelosi.png", full_page=True)
             Path("debug_pelosi.html").write_text(page.content(), encoding="utf-8")
             raise
 
-        table = page.locator("table", has_text="Asset").filter(has_text="Action").first
+        table = (
+            page.locator("table")
+            .filter(has=page.locator("th", has_text="Transaction"))
+            .filter(has=page.locator("th", has_text="Traded"))
+            .first
+        )
+        headers = [clean(h).lower() for h in table.locator("thead th").all_inner_texts()]
+
+        def col(name: str, default: int) -> int:
+            for i, h in enumerate(headers):
+                if name in h:
+                    return i
+            return default
+
+        i_stock, i_tx = col("stock", 0), col("transaction", 1)
+        i_filed, i_traded = col("filed", 2), col("traded", 3)
+        i_desc = col("description", 4)
+
         trades = []
         rows = table.locator("tbody tr")
         for r in range(rows.count()):
-            row = rows.nth(r)
-            cells = [clean(c) for c in row.locator("td").all_inner_texts()]
-            if len(cells) < 4:
+            cells = [clean(c) for c in rows.nth(r).locator("td").all_inner_texts()]
+            if len(cells) <= max(i_stock, i_tx, i_filed, i_traded):
                 continue
-            when, asset, action, amount = cells[:4]
-            link = ""
-            anchors = row.locator("a[href]")
-            if anchors.count():
-                link = anchors.first.get_attribute("href") or ""
-            key = "|".join(RELATIVE.sub("", c) for c in (when, asset, action, amount, link))
+            stock, tx = cells[i_stock], cells[i_tx]
+            filed, traded = cells[i_filed], cells[i_traded]
+            desc = cells[i_desc] if i_desc < len(cells) else ""
+            # Excess return changes over time, so it is NOT part of the ID.
+            key = "|".join([stock, tx, filed, traded, desc])
             trades.append(
                 {
                     "id": hashlib.sha1(key.encode()).hexdigest(),
-                    "when": when,
-                    "asset": asset,
-                    "action": action,
-                    "amount": amount,
-                    "link": link,
+                    "stock": stock,
+                    "transaction": tx,
+                    "filed": filed,
+                    "traded": traded,
+                    "description": desc,
                 }
             )
         browser.close()
@@ -105,17 +115,15 @@ def post_discord(content: str) -> None:
 
 def format_trade(t: dict) -> str:
     msg = (
-        "🏛️ **New Pelosi trade disclosed**\n"
-        f"**Asset:** {t['asset']}\n"
-        f"**Action:** {t['action']}\n"
-        f"**Amount:** {t['amount']}\n"
-        f"**Traded / Filed:** {t['when']}\n"
+        "🏛️ **New Pelosi trade filed**\n"
+        f"**Stock:** {t['stock']}\n"
+        f"**Transaction (type / size):** {t['transaction']}\n"
+        f"**Traded:** {t['traded']}\n"
+        f"**Filed:** {t['filed']}\n"
     )
-    if t["link"]:
-        link = t["link"] if t["link"].startswith("http") else "https://purepowerpicks.com" + t["link"]
-        msg += f"<{link}>\n"
-    msg += f"<{URL}>"
-    return msg
+    if t["description"]:
+        msg += f"**Details:** {t['description'][:300]}\n"
+    return msg + f"<{URL}>"
 
 
 def main() -> int:
@@ -135,11 +143,11 @@ def main() -> int:
     new = [t for t in trades if t["id"] not in seen]
     print(f"{len(trades)} trades on page, {len(new)} new.")
 
-    # The feed lists newest first; alert oldest first.
+    # The table lists newest first; alert oldest first.
     for t in reversed(new):
         post_discord(format_trade(t))
         seen.add(t["id"])
-        SEEN_FILE.write_text(json.dumps(sorted(seen)))
+        SEEN_FILE.write_text(json.dumps(sorted(seen)))  # save as we go so a crash can't re-alert
         time.sleep(1)
     return 0
 
