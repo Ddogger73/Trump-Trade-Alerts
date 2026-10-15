@@ -18,6 +18,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -69,7 +71,13 @@ jobs:
           for f in seen.json seen_pelosi.json seen_davidson.json seen_buffett.json; do
             if [ -f "$f" ]; then git add "$f"; fi
           done
-          git diff --cached --quiet || (git commit -m "Update seen trades" && git push)
+          if ! git diff --cached --quiet; then
+            git commit -m "Update seen trades"
+            for i in 1 2 3 4 5; do
+              git pull --rebase -q origin main && git push && break
+              sleep $((RANDOM % 5 + 2))
+            done
+          fi
 
       - name: Upload debug files on failure
         if: failure()
