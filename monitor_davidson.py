@@ -132,6 +132,9 @@ def main() -> int:
         print("No trades parsed. Page layout may have changed.", file=sys.stderr)
         return 1
 
+    # Shared with monitor_overlap.py (same workflow run; not committed)
+    Path("trades_davidson.json").write_text(json.dumps(trades))
+
     if not SEEN_FILE.exists():
         SEEN_FILE.write_text(json.dumps([t["id"] for t in trades]))
         post_discord(f"✅ Davidson trade tracker is live. Watching {len(trades)} existing trades; "
