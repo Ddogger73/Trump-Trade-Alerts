@@ -1,0 +1,41 @@
+name: Truth Social monitor
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # every 5 min (GitHub's minimum; runs can be delayed)
+  workflow_dispatch:         # lets you run it manually from the Actions tab
+
+permissions:
+  contents: write
+
+concurrency:
+  group: truth-monitor
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for matching Truth Social posts
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python3 monitor_truth.py
+
+      - name: Save seen posts
+        if: always()
+        run: |
+          git config user.name "trade-bot"
+          git config user.email "trade-bot@users.noreply.github.com"
+          if [ -f seen_truth.json ]; then git add seen_truth.json; fi
+          if ! git diff --cached --quiet; then
+            git commit -m "Update seen Truth Social posts"
+            for i in 1 2 3 4 5; do
+              git pull --rebase -q origin main && git push && break
+              sleep $((RANDOM % 5 + 2))
+            done
+          fi
